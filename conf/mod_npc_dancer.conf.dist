@@ -10,8 +10,8 @@ Dancer.Announce = 0
 #
 #    Tips in copper (10000 = 1 gold)
 
-Dancer.Tip1 = 10000
-Dancer.Tip2 = 50000
-Dancer.Tip3 = 100000
-Dancer.Tip4 = 250000
-Dancer.Tip5 = 500000
+Dancer.Tip1 = 100000
+Dancer.Tip2 = 500000
+Dancer.Tip3 = 1000000
+Dancer.Tip4 = 2500000
+Dancer.Tip5 = 5000000

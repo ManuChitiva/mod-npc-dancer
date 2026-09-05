@@ -48,7 +48,7 @@ struct DancerSession
 
 static bool DancerEnable = true;
 static bool DancerAnnounce = false;
-static uint64 DancerTip[5] = { 10000, 50000, 100000, 250000, 500000 };
+static uint64 DancerTip[5] = { 100000, 500000, 1000000, 2500000, 5000000 };
 static std::map<ObjectGuid, DancerSession> DancerSessions;
 
 static std::string FormatGold(uint64 copper)
@@ -565,11 +565,11 @@ public:
     {
         DancerEnable = sConfigMgr->GetOption<bool>("Dancer.Enable", true);
         DancerAnnounce = sConfigMgr->GetOption<bool>("Dancer.Announce", false);
-        DancerTip[0] = sConfigMgr->GetOption<uint64>("Dancer.Tip1", 10000);
-        DancerTip[1] = sConfigMgr->GetOption<uint64>("Dancer.Tip2", 50000);
-        DancerTip[2] = sConfigMgr->GetOption<uint64>("Dancer.Tip3", 100000);
-        DancerTip[3] = sConfigMgr->GetOption<uint64>("Dancer.Tip4", 250000);
-        DancerTip[4] = sConfigMgr->GetOption<uint64>("Dancer.Tip5", 500000);
+        DancerTip[0] = sConfigMgr->GetOption<uint64>("Dancer.Tip1", 100000);
+        DancerTip[1] = sConfigMgr->GetOption<uint64>("Dancer.Tip2", 500000);
+        DancerTip[2] = sConfigMgr->GetOption<uint64>("Dancer.Tip3", 1000000);
+        DancerTip[3] = sConfigMgr->GetOption<uint64>("Dancer.Tip4", 2500000);
+        DancerTip[4] = sConfigMgr->GetOption<uint64>("Dancer.Tip5", 5000000);
     }
 };
 
