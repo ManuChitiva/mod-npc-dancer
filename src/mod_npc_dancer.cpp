@@ -1,7 +1,10 @@
 #include "Chat.h"
 #include "Config.h"
 #include "Creature.h"
+#include "DatabaseEnv.h"
 #include "GossipDef.h"
+#include "Item.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
 #include "ScriptedGossip.h"
@@ -38,6 +41,9 @@ struct DancerSession
     int32 lastTierLine[5] = { -1, -1, -1, -1, -1 };
     int32 lastExtra = -1;
     int32 lastHello = -1;
+    uint32 lastItem = 0;
+    uint32 lastItemCount = 0;
+    std::string lastItemName;
 };
 
 static bool DancerEnable = true;
@@ -48,6 +54,105 @@ static std::map<ObjectGuid, DancerSession> DancerSessions;
 static std::string FormatGold(uint64 copper)
 {
     return std::to_string(copper / 10000) + " oro";
+}
+
+static uint8 PrizeQualityForTier(uint8 tier)
+{
+    if (tier >= 4)
+        return 4;
+    if (tier >= 3)
+        return 3;
+    if (tier >= 2)
+        return 2;
+    return 1;
+}
+
+static bool GiveItemFromTemplate(Player* player, uint32 itemId, uint32 count, std::string& outName)
+{
+    QueryResult itemRow = WorldDatabase.Query("SELECT entry, name FROM item_template WHERE entry = {}", itemId);
+    if (!itemRow)
+        return false;
+
+    Field* fields = itemRow->Fetch();
+    uint32 dbEntry = fields[0].Get<uint32>();
+    outName = fields[1].Get<std::string>();
+    if (dbEntry != itemId)
+        return false;
+
+    ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+    if (!proto)
+        return false;
+
+    ItemPosCountVec dest;
+    InventoryResult msg = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, count);
+    if (msg != EQUIP_ERR_OK)
+    {
+        player->SendEquipError(msg, nullptr, nullptr, itemId);
+        return false;
+    }
+
+    Item* item = player->StoreNewItem(dest, itemId, true);
+    if (!item)
+        return false;
+
+    player->SendNewItem(item, count, true, false);
+    return true;
+}
+
+static bool RollGiftItem(Player* player, uint8 tier, uint32& itemId, uint32& itemCount, std::string& itemName)
+{
+    uint8 quality = PrizeQualityForTier(tier);
+    uint32 playerLevel = player->GetLevel();
+
+    for (uint8 attempt = 0; attempt < 10; ++attempt)
+    {
+        uint8 q = quality;
+        if (attempt > 3 && q > 1)
+            q = quality - 1;
+        if (attempt > 6)
+            q = 1;
+
+        QueryResult result = WorldDatabase.Query(
+            "SELECT entry, name, `class` FROM item_template "
+            "WHERE Quality = {} "
+            "AND `class` NOT IN (6, 10, 11, 12, 13) "
+            "AND (Flags & 16) = 0 "
+            "AND RequiredLevel <= {} "
+            "AND name NOT LIKE '%DEPRECATED%' "
+            "AND name NOT LIKE '%Test%' "
+            "AND name NOT LIKE '%OLD%' "
+            "AND name NOT LIKE '%NPC%' "
+            "ORDER BY RAND() LIMIT 1",
+            q, playerLevel);
+
+        if (!result)
+            continue;
+
+        Field* fields = result->Fetch();
+        itemId = fields[0].Get<uint32>();
+        itemName = fields[1].Get<std::string>();
+        uint32 itemClass = fields[2].Get<uint32>();
+        itemCount = (itemClass == 7) ? urand(1, 5) : 1;
+
+        if (GiveItemFromTemplate(player, itemId, itemCount, itemName))
+            return true;
+    }
+
+    itemId = 0;
+    itemCount = 0;
+    itemName.clear();
+    return false;
+}
+
+static std::string GiftWhisper(std::string const& name, std::string const& itemName, uint32 count)
+{
+    std::vector<std::string> lines = {
+        " Toma, " + name + "... un detalle de mi parte: " + itemName + ".",
+        " Esto te lo quito de mi cofre. " + itemName + " x" + std::to_string(count) + ".",
+        " Un recuerdo para que no se te olvide esta danza: " + itemName + ".",
+        " Guarda esto debajo de la almohada. " + itemName + "."
+    };
+    return lines[urand(0, lines.size() - 1)];
 }
 
 static uint8 TipTier(uint32 action)
@@ -273,31 +378,76 @@ public:
         npc_gold_dancerAI(Creature* creature) : ScriptedAI(creature) { }
 
         uint32 danceRemain = 0;
+        uint32 ambientTimer = 8000;
 
         void Reset() override
         {
             danceRemain = 0;
+            ambientTimer = urand(8000, 14000);
             me->SetUInt32Value(UNIT_NPC_EMOTESTATE, 0);
         }
 
-        void StartPaidDance(uint32 durationMs)
+        void StartPaidDance(Player* player, uint32 durationMs)
         {
             danceRemain = durationMs;
+            ambientTimer = durationMs + urand(4000, 8000);
+            if (player)
+                me->SetFacingToObject(player);
             me->SetUInt32Value(UNIT_NPC_EMOTESTATE, EMOTE_STATE_DANCE);
+            me->CastSpell(me, 31726, true);
+            me->CastSpell(me, 44940, true);
+        }
+
+        void DoAmbient()
+        {
+            if (Player* nearPlayer = me->SelectNearestPlayer(20.0f))
+                me->SetFacingToObject(nearPlayer);
+
+            switch (urand(1, 5))
+            {
+                case 1: me->HandleEmoteCommand(EMOTE_ONESHOT_WAVE); break;
+                case 2: me->HandleEmoteCommand(EMOTE_ONESHOT_SHY); break;
+                case 3: me->HandleEmoteCommand(EMOTE_ONESHOT_KISS); break;
+                case 4: me->HandleEmoteCommand(EMOTE_ONESHOT_LAUGH); break;
+                default: me->HandleEmoteCommand(EMOTE_ONESHOT_FLEX); break;
+            }
+
+            switch (urand(1, 8))
+            {
+                case 1: me->Say("Alguien con oro y buen gusto... me aburro aqui sola.", LANG_UNIVERSAL); break;
+                case 2: me->Say("Si me miras tanto, al menos deja una moneda.", LANG_UNIVERSAL); break;
+                case 3: me->Say("La noche es corta. Yo no.", LANG_UNIVERSAL); break;
+                case 4: me->Say("Un baile, un secreto, un poco de oro...", LANG_UNIVERSAL); break;
+                case 5: me->Say("No muerdo. Bueno... casi nunca.", LANG_UNIVERSAL); break;
+                case 6: me->Say("Ven. Te prometo que vale cada cobre.", LANG_UNIVERSAL); break;
+                case 7: me->Say("Esta sala se siente vacia sin un cliente generoso.", LANG_UNIVERSAL); break;
+                default: me->Say("Mmm... necesito musica. O un admirador.", LANG_UNIVERSAL); break;
+            }
         }
 
         void UpdateAI(uint32 diff) override
         {
-            if (!danceRemain)
-                return;
-
-            if (danceRemain <= diff)
+            if (danceRemain)
             {
-                danceRemain = 0;
-                me->SetUInt32Value(UNIT_NPC_EMOTESTATE, 0);
+                if (danceRemain <= diff)
+                {
+                    danceRemain = 0;
+                    me->SetUInt32Value(UNIT_NPC_EMOTESTATE, 0);
+                    me->HandleEmoteCommand(EMOTE_ONESHOT_KISS);
+                    me->Say("Vuelve cuando quieras otro baile...", LANG_UNIVERSAL);
+                }
+                else
+                    danceRemain -= diff;
+                return;
+            }
+
+            if (ambientTimer <= diff)
+            {
+                DoAmbient();
+                ambientTimer = urand(14000, 28000);
             }
             else
-                danceRemain -= diff;
+                ambientTimer -= diff;
         }
     };
 
@@ -306,14 +456,16 @@ public:
         DancerSession const& session = DancerSessions[player->GetGUID()];
         player->PlayerTalkClass->ClearMenus();
 
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Dejar " + FormatGold(DancerTip[0]) + " (juguetona)", GOSSIP_SENDER_MAIN, ACTION_TIP_1);
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Dejar " + FormatGold(DancerTip[1]) + " (coqueta)", GOSSIP_SENDER_MAIN, ACTION_TIP_2);
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Dejar " + FormatGold(DancerTip[2]) + " (sensual)", GOSSIP_SENDER_MAIN, ACTION_TIP_3);
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Dejar " + FormatGold(DancerTip[3]) + " (atrevida)", GOSSIP_SENDER_MAIN, ACTION_TIP_4);
-        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "Dejar " + FormatGold(DancerTip[4]) + " (intima)", GOSSIP_SENDER_MAIN, ACTION_TIP_5);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|TInterface\\icons\\INV_Misc_Coin_01:40:40:-18|t Dejar " + FormatGold(DancerTip[0]) + " (juguetona)", GOSSIP_SENDER_MAIN, ACTION_TIP_1);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|TInterface\\icons\\INV_Misc_Coin_03:40:40:-18|t Dejar " + FormatGold(DancerTip[1]) + " (coqueta)", GOSSIP_SENDER_MAIN, ACTION_TIP_2);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|TInterface\\icons\\INV_Misc_Coin_05:40:40:-18|t Dejar " + FormatGold(DancerTip[2]) + " (sensual)", GOSSIP_SENDER_MAIN, ACTION_TIP_3);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|TInterface\\icons\\INV_Misc_Gem_Pearl_04:40:40:-18|t Dejar " + FormatGold(DancerTip[3]) + " (atrevida)", GOSSIP_SENDER_MAIN, ACTION_TIP_4);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, "|TInterface\\icons\\INV_Jewelry_Talisman_12:40:40:-18|t Dejar " + FormatGold(DancerTip[4]) + " (intima)", GOSSIP_SENDER_MAIN, ACTION_TIP_5);
 
         if (session.totalCopper)
             AddGossipItemFor(player, GOSSIP_ICON_MONEY_BAG, "Esta noche me has dado " + FormatGold(session.totalCopper) + ".", GOSSIP_SENDER_MAIN, ACTION_BACK);
+        if (session.lastItem)
+            AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "Ultimo regalo: " + session.lastItemName + " x" + std::to_string(session.lastItemCount), GOSSIP_SENDER_MAIN, ACTION_BACK);
 
         SendGossipMenuFor(player, textId, creature->GetGUID());
     }
@@ -360,12 +512,35 @@ public:
 
         uint32 danceMs = 8000 + (tier * 4000);
         if (npc_gold_dancerAI* ai = CAST_AI(npc_gold_dancerAI, creature->AI()))
-            ai->StartPaidDance(danceMs);
+            ai->StartPaidDance(player, danceMs);
         else
+        {
+            creature->SetFacingToObject(player);
             creature->SetUInt32Value(UNIT_NPC_EMOTESTATE, EMOTE_STATE_DANCE);
+        }
+
+        player->CastSpell(player, 47292, true);
+
+        // Visuales de mod-npc-services: 31726 (restore glow) y 59908 (destello).
+        player->CastSpell(player, 31726, true);
+        creature->CastSpell(creature, 31726, true);
+        if (tier >= 2)
+            player->CastSpell(player, 59908, true);
+        if (tier >= 3)
+            player->CastSpell(player, 27741, true); // Love is in the Air
+
+        static uint32 const Blessings[] = { 23735, 23736, 23737, 23738, 23766, 23767, 23768, 23769 };
+        uint32 blessing = Blessings[urand(0, 7)];
+        if (tier >= 3)
+            blessing = (urand(0, 1) ? 23768 : 23737);
+        player->CastSpell(player, blessing, true);
 
         std::string line = LineForTier(tier, player->GetName(), session);
         line += ExtraForSession(session, player->GetName());
+
+        if (RollGiftItem(player, tier, session.lastItem, session.lastItemCount, session.lastItemName))
+            line += GiftWhisper(player->GetName(), session.lastItemName, session.lastItemCount);
+
         creature->Whisper(line.c_str(), LANG_UNIVERSAL, player);
         ChatHandler(player->GetSession()).SendSysMessage(line.c_str());
 

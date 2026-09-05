@@ -21,3 +21,7 @@ Modulo aparte del casino. NPC elfa (Selene). Le pagas oro, ella baila y las fras
 | 50 oro | Intima |
 
 Si acumulas mucho oro en la misma sesion, anade una frase extra.
+
+Al pagar, consulta `item_template` (`ORDER BY RAND()`) y te da un item. Mas oro = mejor Quality (comun a epico). Tambien baila, te mira, habla en voz alta de vez en cuando y suelta un efecto visual.
+
+Usa los destellos de [mod-npc-services](https://github.com/azerothcore/mod-npc-services): hechizos `31726` y `59908`, mas una fortuna de Sayge (`23735`-`23769`) como aura de combate.
