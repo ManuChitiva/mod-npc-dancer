@@ -15,10 +15,10 @@ Modulo aparte del casino. NPC elfa (Selene). Le pagas oro, ella baila y las fras
 | Propina | Tono |
 |---|---|
 | 10 oro | Juguetona |
-| 50 oro | Coqueta |
-| 100 oro | Sensual |
-| 250 oro | Atrevida |
-| 500 oro | Intima |
+| 15 oro | Coqueta |
+| 20 oro | Sensual |
+| 90 oro | Atrevida |
+| 220 oro | Intima |
 
 Si acumulas mucho oro en la misma sesion, anade una frase extra.
 
